@@ -1,7 +1,9 @@
 ################################################################################
 ### Step 1
 ################################################################################
-
+import streamlit as st
+import pandas as pd
+from io import StringIO
 import requests
 import re
 import urllib.request
@@ -338,51 +340,57 @@ def create_context(
     # Return the context
     return "\n\n###\n\n".join(returns)
 
-def answer_question(
-    df,
-    model="text-davinci-003",
-    question="Am I allowed to publish model outputs to Twitter, without a human review?",
-    max_len=1800,
-    size="ada",
-    debug=False,
-    max_tokens=150,
-    stop_sequence=None
-):
-    """
-    Answer a question based on the most similar context from the dataframe texts
-    """
-    context = create_context(
-        question,
-        df,
-        max_len=max_len,
-        size=size,
+# Wrap the crawl function in a new function called "crawl_url"
+def crawl_url(url):
+    df = crawl(url)
+    return df
+
+# Wrap the "create_context" function to be used as an API endpoint
+def get_top_contexts(query, top_n=3):
+    df = pd.read_csv('processed/embeddings.csv', index_col=0)
+    df['embeddings'] = df['embeddings'].apply(eval).apply(np.array)
+    context = create_context(query, df)
+    return context.split("\n\n###\n\n")[:top_n]
+
+# Create the Streamlit app
+def main():
+    st.set_page_config(page_title="Web Crawler and Context API", layout="wide")
+
+    st.title("Web Crawler and Context API")
+
+    st.sidebar.title("Choose an action")
+    action = st.sidebar.selectbox(
+        "",
+        ("Crawl a URL", "Get top contexts"),
+        index=0,
     )
-    # If debug, print the raw model response
-    if debug:
-        print("Context:\n" + context)
-        print("\n\n")
 
-    try:
-        # Create a completions using the questin and context
-        response = openai.Completion.create(
-            prompt=f"Answer the question based on the context below, and if the question can't be answered based on the context, say \"I don't know\"\n\nContext: {context}\n\n---\n\nQuestion: {question}\nAnswer:",
-            temperature=0,
-            max_tokens=max_tokens,
-            top_p=1,
-            frequency_penalty=0,
-            presence_penalty=0,
-            stop=stop_sequence,
-            model=model,
-        )
-        return response["choices"][0]["text"].strip()
-    except Exception as e:
-        print(e)
-        return ""
+    if action == "Crawl a URL":
+        st.header("Crawl a URL and return a DataFrame")
 
-################################################################################
-### Step 13
-################################################################################
+        url = st.text_input("Enter a URL to crawl", value="https://openai.com/")
+        if st.button("Crawl URL"):
+            try:
+                result_df = crawl_url(url)
+                st.write(result_df)
+                csv_buffer = StringIO()
+                result_df.to_csv(csv_buffer)
+                st.download_button("Download CSV", csv_buffer.getvalue(), "crawled_data.csv")
+            except Exception as e:
+                st.error(f"Error while crawling: {e}")
 
-print(answer_question(df, question="What day is it?", debug=False))
+    elif action == "Get top contexts":
+        st.header("Get top 3 contexts for a query")
 
-print(answer_question(df, question="What is our newest embeddings model?"))
+        query = st.text_input("Enter a query", value="")
+        if st.button("Get Contexts"):
+            try:
+                top_contexts = get_top_contexts(query)
+                for i, context in enumerate(top_contexts):
+                    st.markdown(f"**Context {i + 1}:**")
+                    st.write(context)
+            except Exception as e:
+                st.error(f"Error while getting top contexts: {e}")
+
+if __name__ == "__main__":
+    main()
